@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="res_config_settings_view_form_multi_quotation_template_jsi" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.multi.quotation.template.jsi</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="sale.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <!-- Hide the setting for default template -->
+            <label for="company_so_template_id" position="attributes">
+                <attribute name="for">company_sale_order_template_ids</attribute>
+            </label>
+            <field name="company_so_template_id" position="attributes">
+                <attribute name="name">company_sale_order_template_ids</attribute>
+                <attribute name="widget">many2many_tags</attribute>
+            </field>
+        </field>
+    </record>
+
+</odoo>
