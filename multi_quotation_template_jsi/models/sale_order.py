@@ -23,44 +23,33 @@ class SaleOrder(models.Model):
 
     @api.onchange('sale_template_ids')
     def onchange_sale_template_ids_id(self):
-        print(self, self._origin)
         if not self.sale_template_ids:
             self.require_signature = self._get_default_require_signature()
             self.require_payment = self._get_default_require_payment()
             self.old_sale_template = ''
             return
-
         templates = self.sale_template_ids.with_context(lang=self.partner_id.lang)
-
         order_lines = []
         old_order_line_ids = self.order_line.ids
-
-        old_sale_templates = []
-        if self.old_sale_template:
-            old_sale_templates = self.env['sale.order.template'].browse(json.loads(self.old_sale_template)).ids
-
+        old_sale_templates = self.old_sale_template and json.loads(self.old_sale_template) or []
         templates = templates.filtered(lambda x: x._origin.id not in old_sale_templates)
-        if not templates:
-            if len(self.sale_template_ids) != len(old_sale_templates):
-                self.old_sale_template = self.sale_template_ids._origin.ids
+        # when remove a record from many2many, need to remove its id from chat field too
+        if not templates and len(self.sale_template_ids) != len(old_sale_templates):
+            self.old_sale_template = self.sale_template_ids._origin.ids
             return
-        new_templates_order_lines = templates.mapped('sale_order_template_line_ids')
 
+        new_templates_order_lines = templates.mapped('sale_order_template_line_ids')
         for line in new_templates_order_lines:
             data = self._compute_line_data_for_template_change(line)
-
             if line.product_id:
                 price = line.product_id.lst_price
                 discount = 0
-
                 if self.pricelist_id:
                     pricelist_price = self.pricelist_id.with_context(uom=line.product_uom_id.id).get_product_price(line.product_id, 1, False)
-
                     if self.pricelist_id.discount_policy == 'without_discount' and price:
                         discount = max(0, (price - pricelist_price) * 100 / price)
                     else:
                         price = pricelist_price
-
                 data.update({
                     'price_unit': price,
                     'discount': discount,
@@ -69,7 +58,6 @@ class SaleOrder(models.Model):
                     'product_uom': line.product_uom_id.id,
                     'customer_lead': self._get_customer_lead(line.product_id.product_tmpl_id),
                 })
-
             order_lines.append((0, 0, data))
 
         self.order_line = order_lines
@@ -81,12 +69,9 @@ class SaleOrder(models.Model):
         for option in template_option_lines:
             data = self._compute_option_data_for_template_change(option)
             option_lines.append((0, 0, data))
-
         self.sale_order_option_ids = option_lines
-
         if not self.validity_date and max(templates.mapped('number_of_days')) > 0:
             self.validity_date = fields.Date.context_today(self) + timedelta(max(templates.mapped('number_of_days')))
-
         self.require_signature = any(temp.require_signature for temp in templates)
         self.require_payment = any(temp.require_payment for temp in templates)
         self.note = '\n'.join(note for note in templates.mapped('note') if note)
