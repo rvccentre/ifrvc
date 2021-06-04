@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from datetime import timedelta
+import json
 
 from odoo import api, fields, models
 
@@ -18,20 +19,34 @@ class SaleOrder(models.Model):
         return default_vals
 
     sale_template_ids = fields.Many2many('sale.order.template', string='Quotation Templates')
+    old_sale_template = fields.Char()
 
     @api.onchange('sale_template_ids')
     def onchange_sale_template_ids_id(self):
-
+        print(self, self._origin)
         if not self.sale_template_ids:
             self.require_signature = self._get_default_require_signature()
             self.require_payment = self._get_default_require_payment()
+            self.old_sale_template = ''
             return
 
         templates = self.sale_template_ids.with_context(lang=self.partner_id.lang)
 
-        order_lines = [(5, 0, 0)]
-        template_order_lines = templates.mapped('sale_order_template_line_ids')
-        for line in template_order_lines:
+        order_lines = []
+        old_order_line_ids = self.order_line.ids
+
+        old_sale_templates = []
+        if self.old_sale_template:
+            old_sale_templates = self.env['sale.order.template'].browse(json.loads(self.old_sale_template)).ids
+
+        templates = templates.filtered(lambda x: x._origin.id not in old_sale_templates)
+        if not templates:
+            if len(self.sale_template_ids) != len(old_sale_templates):
+                self.old_sale_template = self.sale_template_ids._origin.ids
+            return
+        new_templates_order_lines = templates.mapped('sale_order_template_line_ids')
+
+        for line in new_templates_order_lines:
             data = self._compute_line_data_for_template_change(line)
 
             if line.product_id:
@@ -58,10 +73,10 @@ class SaleOrder(models.Model):
             order_lines.append((0, 0, data))
 
         self.order_line = order_lines
-        self.order_line._compute_tax_id()
+        self.order_line.filtered(lambda x: x._origin.id not in old_order_line_ids)._compute_tax_id()
 
         # then, process the list of optional products from the templates
-        option_lines = [(5, 0, 0)]
+        option_lines = []
         template_option_lines = templates.mapped('sale_order_template_option_ids')
         for option in template_option_lines:
             data = self._compute_option_data_for_template_change(option)
@@ -69,12 +84,13 @@ class SaleOrder(models.Model):
 
         self.sale_order_option_ids = option_lines
 
-        if max(templates.mapped('number_of_days')) > 0:
+        if not self.validity_date and max(templates.mapped('number_of_days')) > 0:
             self.validity_date = fields.Date.context_today(self) + timedelta(max(templates.mapped('number_of_days')))
 
         self.require_signature = any(temp.require_signature for temp in templates)
         self.require_payment = any(temp.require_payment for temp in templates)
         self.note = '\n'.join(note for note in templates.mapped('note') if note)
+        self.old_sale_template = self.sale_template_ids._origin.ids
 
     def action_confirm(self):
         res = super(SaleOrder, self).action_confirm()
